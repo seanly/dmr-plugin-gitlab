@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,10 +10,23 @@ import (
 	"net/http"
 	"net/rpc"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/seanly/dmr/pkg/plugin/proto"
 )
+
+// ReviewPromptData holds the template variables for the review prompt.
+type ReviewPromptData struct {
+	ProjectID      int
+	ProjectName    string
+	MRIID          int
+	Title          string
+	Description    string
+	SourceBranch   string
+	TargetBranch   string
+	ReviewLanguage string
+}
 
 // WebhookServer receives GitLab webhook events and triggers code review.
 type WebhookServer struct {
@@ -138,31 +152,22 @@ func (s *WebhookServer) triggerReview(projectID, mrIID int, event GitLabWebhookE
 
 	tapeName := fmt.Sprintf("gitlab:%d:mr:%d", projectID, mrIID)
 
-	prompt := fmt.Sprintf(`请审查 GitLab MR #%d（%s）的代码变更。
+	data := ReviewPromptData{
+		ProjectID:      projectID,
+		ProjectName:    event.Project.Name,
+		MRIID:          mrIID,
+		Title:          event.ObjectAttributes.Title,
+		Description:    event.ObjectAttributes.Description,
+		SourceBranch:   event.ObjectAttributes.SourceBranch,
+		TargetBranch:   event.ObjectAttributes.TargetBranch,
+		ReviewLanguage: s.config.ReviewLanguage,
+	}
 
-MR 信息：
-- 项目: %s (ID: %d)
-- 标题: %s
-- 描述: %s
-- 源分支: %s → 目标分支: %s
-
-请执行以下步骤：
-1. 使用 gitlab_get_mr_diff 工具获取 MR 的代码变更（project_id=%d, mr_iid=%d）
-2. 仔细审查每个文件的变更，关注代码质量、潜在 Bug、安全问题和性能问题
-3. 使用 gitlab_post_comment 工具发布整体审查总结（project_id=%d, mr_iid=%d）
-4. 对于具体的代码问题，使用 gitlab_post_discussion 工具在对应代码行上添加行内评论（project_id=%d, mr_iid=%d）
-
-审查语言：%s`,
-		mrIID, event.ObjectAttributes.Title,
-		event.Project.Name, projectID,
-		event.ObjectAttributes.Title,
-		event.ObjectAttributes.Description,
-		event.ObjectAttributes.SourceBranch, event.ObjectAttributes.TargetBranch,
-		projectID, mrIID,
-		projectID, mrIID,
-		projectID, mrIID,
-		s.config.ReviewLanguage,
-	)
+	prompt, err := renderPrompt(s.config.ReviewPrompt, data)
+	if err != nil {
+		log.Printf("dmr-plugin-gitlab: render prompt error: %v, falling back to default", err)
+		prompt, _ = renderPrompt(DefaultReviewPrompt, data)
+	}
 
 	req := &proto.RunAgentRequest{
 		TapeName: tapeName,
@@ -180,6 +185,19 @@ MR 信息：
 		return
 	}
 	log.Printf("dmr-plugin-gitlab: review completed for %s (%d steps)", tapeName, resp.Steps)
+}
+
+// renderPrompt renders the review prompt template with the given data.
+func renderPrompt(tmplStr string, data ReviewPromptData) (string, error) {
+	tmpl, err := template.New("review").Parse(tmplStr)
+	if err != nil {
+		return "", fmt.Errorf("parse template: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute template: %w", err)
+	}
+	return buf.String(), nil
 }
 
 func (s *WebhookServer) handleHealth(w http.ResponseWriter, r *http.Request) {

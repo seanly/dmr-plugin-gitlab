@@ -46,6 +46,43 @@ plugins:
         - "go.sum"
 ```
 
+### 自定义审查 Prompt
+
+`review_prompt` 字段支持 Go `text/template` 语法，可自定义审查指令。不配置则使用默认模板。
+
+可用模板变量：
+
+| 变量 | 说明 |
+|------|------|
+| `{{.ProjectID}}` | GitLab 项目 ID |
+| `{{.ProjectName}}` | 项目名称 |
+| `{{.MRIID}}` | MR 编号 |
+| `{{.Title}}` | MR 标题 |
+| `{{.Description}}` | MR 描述 |
+| `{{.SourceBranch}}` | 源分支 |
+| `{{.TargetBranch}}` | 目标分支 |
+| `{{.ReviewLanguage}}` | 审查语言 |
+
+示例：
+
+```yaml
+plugins:
+  - name: gitlab_reviewer
+    config:
+      review_prompt: |
+        你是一个资深安全审计员。请审查 MR #{{.MRIID}}（{{.Title}}）。
+        项目: {{.ProjectName}} (ID: {{.ProjectID}})
+        分支: {{.SourceBranch}} → {{.TargetBranch}}
+
+        步骤：
+        1. 使用 gitlab_get_mr_diff 获取变更（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
+        2. 重点关注：SQL 注入、XSS、敏感信息泄露、权限绕过
+        3. 使用 gitlab_post_comment 发布审查总结（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
+        4. 使用 gitlab_post_discussion 对问题代码添加行内评论（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
+
+        审查语言：{{.ReviewLanguage}}
+```
+
 ## GitLab Webhook 配置
 
 在 GitLab 项目 Settings → Webhooks 中添加：
