@@ -51,7 +51,13 @@ func (p *GitLabPlugin) Init(req *proto.InitRequest, resp *proto.InitResponse) er
 }
 
 // SetHostClient implements proto.HostClientSetter.
-func (p *GitLabPlugin) SetHostClient(c *rpc.Client) {
+func (p *GitLabPlugin) SetHostClient(client any) {
+	c, ok := client.(*rpc.Client)
+	if !ok {
+		log.Printf("dmr-plugin-gitlab: SetHostClient received unexpected type %T", client)
+		return
+	}
+	log.Printf("dmr-plugin-gitlab: SetHostClient called (server=%v)", p.server != nil)
 	p.hostClient = c
 	if p.server != nil {
 		p.server.SetHostClient(c)
@@ -114,7 +120,7 @@ func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 					"project_id": {"type": "integer", "description": "GitLab project ID"},
 					"mr_iid": {"type": "integer", "description": "Merge Request IID"},
 					"file_path": {"type": "string", "description": "文件路径"},
-					"new_line": {"type": "integer", "description": "diff 中的新文件行号"},
+					"new_line": {"type": "integer", "description": "MR 新文件中的行号（与 gitlab_get_mr_diff 里该文件一致）。插件会从 MR unified diff 自动补全 old_line/old_path，以便 GitLab 13.x 在「变更」里显示锚点"},
 					"body": {"type": "string", "description": "评论内容"}
 				},
 				"required": ["project_id", "mr_iid", "file_path", "new_line", "body"]

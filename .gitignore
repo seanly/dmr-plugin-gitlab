@@ -15,3 +15,5 @@ dmr-plugin-gitlab
 .vscode/
 *.swp
 *.swo
+
+dmr-plugin-*

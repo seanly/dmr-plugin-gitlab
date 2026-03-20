@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"strings"
 	"sync"
 	"text/template"
 	"time"
@@ -37,6 +38,16 @@ type WebhookServer struct {
 	mux        *http.ServeMux
 	srv        *http.Server
 	mu         sync.Mutex
+
+	// reviewJobQueue is non-nil when max_concurrent_reviews > 0 (worker pool + bounded queue).
+	reviewJobQueue chan reviewJob
+}
+
+// reviewJob is one MR review handed to a worker.
+type reviewJob struct {
+	projectID int
+	mrIID     int
+	event     GitLabWebhookEvent
 }
 
 // NewWebhookServer creates a new webhook HTTP server.
@@ -50,7 +61,27 @@ func NewWebhookServer(config GitLabPluginConfig, glClient *GitLabClient, hostCli
 	}
 	s.mux.HandleFunc("/webhook/gitlab", s.handleWebhook)
 	s.mux.HandleFunc("/health", s.handleHealth)
+
+	if config.MaxConcurrentReviews > 0 {
+		q := config.MaxQueuedReviews
+		if q <= 0 {
+			q = 64
+		}
+		s.reviewJobQueue = make(chan reviewJob, q)
+		for i := 0; i < config.MaxConcurrentReviews; i++ {
+			go s.reviewWorker()
+		}
+		log.Printf("dmr-plugin-gitlab: review limiter active (max_concurrent=%d, max_queued=%d)",
+			config.MaxConcurrentReviews, q)
+	}
+
 	return s
+}
+
+func (s *WebhookServer) reviewWorker() {
+	for job := range s.reviewJobQueue {
+		s.triggerReview(job.projectID, job.mrIID, job.event)
+	}
 }
 
 // SetHostClient sets the reverse RPC client (called after broker connection).
@@ -115,7 +146,17 @@ func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Only handle open/update actions
+	// Older GitLab versions (< 15.x) don't include "action" in webhook payload;
+	// fall back to inferring from "state".
 	action := event.ObjectAttributes.Action
+	if action == "" {
+		switch event.ObjectAttributes.State {
+		case "opened":
+			action = "open"
+		case "merged", "closed":
+			// not actionable
+		}
+	}
 	if action != "open" && action != "update" && action != "reopen" {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ignored", "reason": "action: " + action})
@@ -125,15 +166,30 @@ func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	projectID := event.Project.ID
 	mrIID := event.ObjectAttributes.IID
 
-	// Dedup check
+	// Dedup check (reserves slot; released if queue is full — see Forget below)
 	if !s.dedup.ShouldProcess(projectID, mrIID) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "skipped", "reason": "cooldown"})
 		return
 	}
 
-	// Trigger review asynchronously
-	go s.triggerReview(projectID, mrIID, event)
+	if s.reviewJobQueue != nil {
+		job := reviewJob{projectID: projectID, mrIID: mrIID, event: event}
+		select {
+		case s.reviewJobQueue <- job:
+			// queued for a worker
+		default:
+			s.dedup.Forget(projectID, mrIID)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "rejected", "reason": "review queue full (max concurrent + buffer exceeded)",
+			})
+			return
+		}
+	} else {
+		go s.triggerReview(projectID, mrIID, event)
+	}
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
@@ -175,8 +231,11 @@ func (s *WebhookServer) triggerReview(projectID, mrIID int, event GitLabWebhookE
 	}
 	var resp proto.RunAgentResponse
 
+	cleanupMergeBlock := s.prepareMergeBlockDuringReview(projectID, mrIID, event.ObjectAttributes.WorkInProgress)
+	defer cleanupMergeBlock()
+
 	log.Printf("dmr-plugin-gitlab: triggering review for %s", tapeName)
-	if err := host.Call("HostService.RunAgent", req, &resp); err != nil {
+	if err := host.Call("Plugin.RunAgent", req, &resp); err != nil {
 		log.Printf("dmr-plugin-gitlab: RunAgent RPC error: %v", err)
 		return
 	}
@@ -185,6 +244,57 @@ func (s *WebhookServer) triggerReview(projectID, mrIID int, event GitLabWebhookE
 		return
 	}
 	log.Printf("dmr-plugin-gitlab: review completed for %s (%d steps)", tapeName, resp.Steps)
+}
+
+// prepareMergeBlockDuringReview marks the MR as non-mergeable while review runs (GitLab 13.8+).
+// Uses work_in_progress API first; if that fails, falls back to a "WIP: " title prefix.
+// If the MR is already WIP or blocking fails, returns a no-op cleanup.
+func (s *WebhookServer) prepareMergeBlockDuringReview(projectID, mrIID int, alreadyWIP bool) (cleanup func()) {
+	nop := func() {}
+	if !s.config.BlockMergeDuringReview {
+		return nop
+	}
+	if alreadyWIP {
+		return nop
+	}
+
+	// Prefer API flag (same as UI “进行中” / Draft).
+	if err := s.glClient.SetMRWorkInProgress(projectID, mrIID, true); err == nil {
+		log.Printf("dmr-plugin-gitlab: MR %d/%d marked work_in_progress during review", projectID, mrIID)
+		return func() {
+			if e := s.glClient.SetMRWorkInProgress(projectID, mrIID, false); e != nil {
+				log.Printf("dmr-plugin-gitlab: clear work_in_progress for %d/%d: %v", projectID, mrIID, e)
+			}
+		}
+	} else {
+		log.Printf("dmr-plugin-gitlab: work_in_progress API failed, trying WIP title: %v", err)
+	}
+
+	title, err := s.glClient.GetMRTitle(projectID, mrIID)
+	if err != nil {
+		log.Printf("dmr-plugin-gitlab: merge block skipped (get title): %v", err)
+		return nop
+	}
+	if mergeBlockTitlePrefix(title) {
+		return nop
+	}
+	newTitle := "WIP: " + title
+	if err := s.glClient.UpdateMergeRequest(projectID, mrIID, map[string]any{"title": newTitle}); err != nil {
+		log.Printf("dmr-plugin-gitlab: merge block skipped (title): %v", err)
+		return nop
+	}
+	log.Printf("dmr-plugin-gitlab: MR %d/%d title prefixed with WIP during review", projectID, mrIID)
+	return func() {
+		if e := s.glClient.UpdateMergeRequest(projectID, mrIID, map[string]any{"title": title}); e != nil {
+			log.Printf("dmr-plugin-gitlab: restore MR title for %d/%d: %v", projectID, mrIID, e)
+		}
+	}
+}
+
+func mergeBlockTitlePrefix(title string) bool {
+	t := strings.TrimSpace(strings.ToUpper(title))
+	return strings.HasPrefix(t, "WIP:") || strings.HasPrefix(t, "WIP ") ||
+		strings.HasPrefix(t, "DRAFT:") || strings.HasPrefix(t, "DRAFT ")
 }
 
 // renderPrompt renders the review prompt template with the given data.
@@ -223,12 +333,14 @@ type GitLabProject struct {
 }
 
 type MRAttributes struct {
-	IID          int    `json:"iid"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	Action       string `json:"action"`
-	SourceBranch string `json:"source_branch"`
-	TargetBranch string `json:"target_branch"`
+	IID             int    `json:"iid"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	Action          string `json:"action"`
+	State           string `json:"state"`
+	SourceBranch    string `json:"source_branch"`
+	TargetBranch    string `json:"target_branch"`
+	WorkInProgress  bool   `json:"work_in_progress"`
 }
 
 // --- Deduplicator ---
@@ -256,4 +368,12 @@ func (d *Deduplicator) ShouldProcess(projectID, mrIID int) bool {
 	}
 	d.seen[key] = time.Now()
 	return true
+}
+
+// Forget removes the cooldown entry (e.g. when a review was not actually queued).
+func (d *Deduplicator) Forget(projectID, mrIID int) {
+	key := fmt.Sprintf("%d:%d", projectID, mrIID)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.seen, key)
 }
