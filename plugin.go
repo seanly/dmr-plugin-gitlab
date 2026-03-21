@@ -149,6 +149,11 @@ func (p *GitLabPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 	return nil
 }
 
+func (p *GitLabPlugin) ProvideSystemPrompt(_ *proto.ProvideSystemPromptRequest, resp *proto.ProvideSystemPromptResponse) error {
+	resp.Fragment = ""
+	return nil
+}
+
 func (p *GitLabPlugin) executeTool(name string, args map[string]any) (any, error) {
 	projectID := intArg(args, "project_id")
 	mrIID := intArg(args, "mr_iid")
