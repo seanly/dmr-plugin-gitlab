@@ -202,7 +202,7 @@ func (c *GitLabClient) PostDiscussion(projectID, mrIID int, filePath string, new
 	}
 	ch := findChangeForPath(changes, filePath)
 	if ch == nil {
-		return nil, fmt.Errorf("file %q not found in MR changes (check path matches new_path from gitlab_get_mr_diff)", filePath)
+		return nil, fmt.Errorf("file %q not found in MR changes (check path matches new_path from gitlabGetMrDiff)", filePath)
 	}
 
 	oldLine, setOldLine, err := oldLineForNewLineInDiff(ch.Diff, newLine)

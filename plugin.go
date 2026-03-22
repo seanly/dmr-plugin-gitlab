@@ -87,7 +87,7 @@ func (p *GitLabPlugin) RequestBatchApproval(req *proto.BatchApprovalRequest, res
 func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.ProvideToolsResponse) error {
 	resp.Tools = []proto.ToolDef{
 		{
-			Name:        "gitlab_get_mr_diff",
+			Name:        "gitlabGetMrDiff",
 			Description: "获取 GitLab MR 的代码变更 diff",
 			ParametersJSON: `{
 				"type": "object",
@@ -99,7 +99,7 @@ func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 			}`,
 		},
 		{
-			Name:        "gitlab_post_comment",
+			Name:        "gitlabPostComment",
 			Description: "在 GitLab MR 上发布评论（整体审查总结）",
 			ParametersJSON: `{
 				"type": "object",
@@ -112,7 +112,7 @@ func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 			}`,
 		},
 		{
-			Name:        "gitlab_post_discussion",
+			Name:        "gitlabPostDiscussion",
 			Description: "在 GitLab MR 的具体代码行上创建讨论（行内评论）",
 			ParametersJSON: `{
 				"type": "object",
@@ -120,7 +120,7 @@ func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 					"project_id": {"type": "integer", "description": "GitLab project ID"},
 					"mr_iid": {"type": "integer", "description": "Merge Request IID"},
 					"file_path": {"type": "string", "description": "文件路径"},
-					"new_line": {"type": "integer", "description": "MR 新文件中的行号（与 gitlab_get_mr_diff 里该文件一致）。插件会从 MR unified diff 自动补全 old_line/old_path，以便 GitLab 13.x 在「变更」里显示锚点"},
+					"new_line": {"type": "integer", "description": "MR 新文件中的行号（与 gitlabGetMrDiff 里该文件一致）。插件会从 MR unified diff 自动补全 old_line/old_path，以便 GitLab 13.x 在「变更」里显示锚点"},
 					"body": {"type": "string", "description": "评论内容"}
 				},
 				"required": ["project_id", "mr_iid", "file_path", "new_line", "body"]
@@ -149,22 +149,17 @@ func (p *GitLabPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 	return nil
 }
 
-func (p *GitLabPlugin) ProvideSystemPrompt(_ *proto.ProvideSystemPromptRequest, resp *proto.ProvideSystemPromptResponse) error {
-	resp.Fragment = ""
-	return nil
-}
-
 func (p *GitLabPlugin) executeTool(name string, args map[string]any) (any, error) {
 	projectID := intArg(args, "project_id")
 	mrIID := intArg(args, "mr_iid")
 
 	switch name {
-	case "gitlab_get_mr_diff":
+	case "gitlabGetMrDiff":
 		return p.glClient.GetMRDiff(projectID, mrIID, p.config.MaxDiffLines, p.config.IgnorePatterns)
-	case "gitlab_post_comment":
+	case "gitlabPostComment":
 		body, _ := args["body"].(string)
 		return p.glClient.PostComment(projectID, mrIID, body)
-	case "gitlab_post_discussion":
+	case "gitlabPostDiscussion":
 		filePath, _ := args["file_path"].(string)
 		newLine := intArg(args, "new_line")
 		body, _ := args["body"].(string)

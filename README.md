@@ -8,9 +8,9 @@ DMR 外部插件，接收 GitLab Merge Request webhook 事件，通过 DMR agent
 ```
 GitLab ── Webhook POST ──▶ dmr-plugin-gitlab ──▶ DMR Host (RunAgent)
                                 │                       │
-                                ├── gitlab_get_mr_diff   ├── Agent Loop
-                                ├── gitlab_post_comment  ├── Tape 记录
-                                └── gitlab_post_discussion└── OPA Policy
+                                ├── gitlabGetMrDiff   ├── Agent Loop
+                                ├── gitlabPostComment  ├── Tape 记录
+                                └── gitlabPostDiscussion└── OPA Policy
 ```
 
 插件通过 HashiCorp go-plugin (net/rpc) 与 DMR 主进程通信，利用 MuxBroker 反向 RPC 触发 agent.Run()。
@@ -64,7 +64,7 @@ plugins:
 | `gitlab_token` | string | — | 具备读 MR、写评论/讨论、（若启用禁止合并）编辑 MR 的 Personal/Project Access Token，**必填**。 |
 | `review_language` | string | `zh-CN` | 写入默认审查 prompt 的语言说明；可与 `review_prompt` 内文配合使用。 |
 | `review_prompt` | string | 内置模板 | Go `text/template` 审查指令；不配置则使用插件内 `DefaultReviewPrompt`。 |
-| `max_diff_lines` | int | `2000` | `gitlab_get_mr_diff` 侧按单文件 diff 行数过滤的上限；超过则跳过该文件块。 |
+| `max_diff_lines` | int | `2000` | `gitlabGetMrDiff` 侧按单文件 diff 行数过滤的上限；超过则跳过该文件块。 |
 | `ignore_patterns` | string[] | 见代码 | 按简单 glob 忽略不参与 diff 输出的路径（如 `vendor/**`）。 |
 | `cooldown_seconds` | int | `30` | 同一 `project_id + mr_iid` 在冷却时间内重复 webhook 将返回 `skipped`，不触发审查。 |
 | `block_merge_during_review` | bool | `false` | 为 `true` 时，在单次 `RunAgent` 期间尝试禁止合并：优先 `PUT work_in_progress: true`，失败则临时给标题加 `WIP: `，结束后恢复；MR 已是 WIP 则不改。需 Token 有编辑 MR 权限，且实例/项目策略需将 WIP/进行中视为不可合并。 |
@@ -110,10 +110,10 @@ plugins:
         分支: {{.SourceBranch}} → {{.TargetBranch}}
 
         步骤：
-        1. 使用 gitlab_get_mr_diff 获取变更（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
+        1. 使用 gitlabGetMrDiff 获取变更（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
         2. 重点关注：SQL 注入、XSS、敏感信息泄露、权限绕过
-        3. 使用 gitlab_post_comment 发布审查总结（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
-        4. 使用 gitlab_post_discussion 对问题代码添加行内评论（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
+        3. 使用 gitlabPostComment 发布审查总结（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
+        4. 使用 gitlabPostDiscussion 对问题代码添加行内评论（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
         5. 在完成 comment/discussion 之后，调用 `tape.handoff` 为当前 tape 添加一个 anchor，避免下一次审查把本次历史全部带入上下文。
            - name 建议：gitlab:mr:{{.MRIID}}:review-done:<UTC时间戳>
              （UTC 时间戳格式建议：`20060102-150405`）
@@ -133,9 +133,9 @@ plugins:
 
 | Tool | 说明 |
 |------|------|
-| `gitlab_get_mr_diff` | 获取 MR 的代码变更 diff |
-| `gitlab_post_comment` | 在 MR 上发布整体审查评论 |
-| `gitlab_post_discussion` | 在 MR 具体代码行上创建讨论 |
+| `gitlabGetMrDiff` | 获取 MR 的代码变更 diff |
+| `gitlabPostComment` | 在 MR 上发布整体审查评论 |
+| `gitlabPostDiscussion` | 在 MR 具体代码行上创建讨论 |
 
 ## Tape 命名
 
