@@ -99,6 +99,18 @@ func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 			}`,
 		},
 		{
+			Name:        "gitlabGetMrMeta",
+			Description: "获取 GitLab MR 元数据（标题、分支、web_url、作者 username/id；author_email 在 Token 权限允许时返回）",
+			ParametersJSON: `{
+				"type": "object",
+				"properties": {
+					"project_id": {"type": "integer", "description": "GitLab project ID"},
+					"mr_iid": {"type": "integer", "description": "Merge Request IID"}
+				},
+				"required": ["project_id", "mr_iid"]
+			}`,
+		},
+		{
 			Name:        "gitlabPostComment",
 			Description: "在 GitLab MR 上发布评论（整体审查总结）",
 			ParametersJSON: `{
@@ -156,6 +168,8 @@ func (p *GitLabPlugin) executeTool(name string, args map[string]any) (any, error
 	switch name {
 	case "gitlabGetMrDiff":
 		return p.glClient.GetMRDiff(projectID, mrIID, p.config.MaxDiffLines, p.config.IgnorePatterns)
+	case "gitlabGetMrMeta":
+		return p.glClient.GetMRMeta(projectID, mrIID)
 	case "gitlabPostComment":
 		body, _ := args["body"].(string)
 		return p.glClient.PostComment(projectID, mrIID, body)

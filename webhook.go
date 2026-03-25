@@ -219,7 +219,9 @@ func (s *WebhookServer) triggerReview(projectID, mrIID int, event GitLabWebhookE
 		ReviewLanguage: s.config.ReviewLanguage,
 	}
 
-	prompt, err := renderPrompt(s.config.ReviewPrompt, data)
+	tmplStr := s.resolveReviewTemplate(projectID)
+
+	prompt, err := renderPrompt(tmplStr, data)
 	if err != nil {
 		log.Printf("dmr-plugin-gitlab: render prompt error: %v, falling back to default", err)
 		prompt, _ = renderPrompt(DefaultReviewPrompt, data)
@@ -322,9 +324,9 @@ func (s *WebhookServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // GitLabWebhookEvent represents a GitLab webhook payload.
 type GitLabWebhookEvent struct {
-	ObjectKind       string           `json:"object_kind"`
-	Project          GitLabProject    `json:"project"`
-	ObjectAttributes MRAttributes     `json:"object_attributes"`
+	ObjectKind       string        `json:"object_kind"`
+	Project          GitLabProject `json:"project"`
+	ObjectAttributes MRAttributes  `json:"object_attributes"`
 }
 
 type GitLabProject struct {
@@ -333,14 +335,14 @@ type GitLabProject struct {
 }
 
 type MRAttributes struct {
-	IID             int    `json:"iid"`
-	Title           string `json:"title"`
-	Description     string `json:"description"`
-	Action          string `json:"action"`
-	State           string `json:"state"`
-	SourceBranch    string `json:"source_branch"`
-	TargetBranch    string `json:"target_branch"`
-	WorkInProgress  bool   `json:"work_in_progress"`
+	IID            int    `json:"iid"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	Action         string `json:"action"`
+	State          string `json:"state"`
+	SourceBranch   string `json:"source_branch"`
+	TargetBranch   string `json:"target_branch"`
+	WorkInProgress bool   `json:"work_in_progress"`
 }
 
 // --- Deduplicator ---

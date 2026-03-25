@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -260,6 +261,146 @@ func (c *GitLabClient) GetMRInfo(projectID, mrIID int) (map[string]any, error) {
 	var result map[string]any
 	json.Unmarshal(body, &result)
 	return result, nil
+}
+
+// GetProjectDefaultBranch returns the project's default_branch (e.g. main, master).
+func (c *GitLabClient) GetProjectDefaultBranch(projectID int) (string, error) {
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%d", c.baseURL, projectID)
+	body, err := c.get(apiURL)
+	if err != nil {
+		return "", err
+	}
+	var proj struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := json.Unmarshal(body, &proj); err != nil {
+		return "", fmt.Errorf("parse project: %w", err)
+	}
+	if strings.TrimSpace(proj.DefaultBranch) == "" {
+		return "", fmt.Errorf("project response missing default_branch")
+	}
+	return proj.DefaultBranch, nil
+}
+
+// GetProjectIDByPath resolves a GitLab project id from its URL-encoded path (e.g. "group/sub/repo").
+func (c *GitLabClient) GetProjectIDByPath(projectPath string) (int, error) {
+	p := strings.TrimSpace(strings.ReplaceAll(projectPath, "\\", "/"))
+	p = strings.Trim(p, "/")
+	if p == "" {
+		return 0, fmt.Errorf("project path required")
+	}
+	enc := url.PathEscape(p)
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%s", c.baseURL, enc)
+	body, err := c.get(apiURL)
+	if err != nil {
+		return 0, err
+	}
+	var proj struct {
+		ID int `json:"id"`
+	}
+	if err := json.Unmarshal(body, &proj); err != nil {
+		return 0, fmt.Errorf("parse project: %w", err)
+	}
+	if proj.ID == 0 {
+		return 0, fmt.Errorf("project response missing id")
+	}
+	return proj.ID, nil
+}
+
+// GetRepositoryFileRaw fetches file contents from the repository ref (branch, tag, or commit SHA).
+// filePath is the path in the repo (e.g. ".dmr/review.tpl"); leading slashes are trimmed.
+func (c *GitLabClient) GetRepositoryFileRaw(projectID int, filePath, ref string) (string, error) {
+	p := strings.TrimSpace(strings.ReplaceAll(filePath, "\\", "/"))
+	p = strings.TrimPrefix(p, "/")
+	if p == "" || p == "." {
+		return "", fmt.Errorf("file_path required")
+	}
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("ref required")
+	}
+	enc := url.PathEscape(p)
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%d/repository/files/%s/raw?ref=%s",
+		c.baseURL, projectID, enc, url.QueryEscape(ref))
+	body, err := c.get(apiURL)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetUserByID fetches a GitLab user by id (email visible only with sufficient token permissions).
+func (c *GitLabClient) GetUserByID(userID int) (map[string]any, error) {
+	url := fmt.Sprintf("%s/api/v4/users/%d", c.baseURL, userID)
+	body, err := c.get(url)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse user: %w", err)
+	}
+	return result, nil
+}
+
+// GetMRMeta returns MR summary and author fields for notifications (Feishu, etc.).
+// author_email is best-effort: empty if GitLab hides email for the token.
+func (c *GitLabClient) GetMRMeta(projectID, mrIID int) (map[string]any, error) {
+	info, err := c.GetMRInfo(projectID, mrIID)
+	if err != nil {
+		return nil, err
+	}
+	meta := map[string]any{
+		"project_id": projectID,
+		"mr_iid":     mrIID,
+	}
+	if t, ok := info["title"].(string); ok {
+		meta["title"] = t
+	}
+	if d, ok := info["description"].(string); ok {
+		meta["description"] = d
+	}
+	if w, ok := info["web_url"].(string); ok {
+		meta["web_url"] = w
+	}
+	if src, ok := info["source_branch"].(string); ok {
+		meta["source_branch"] = src
+	}
+	if tgt, ok := info["target_branch"].(string); ok {
+		meta["target_branch"] = tgt
+	}
+	author, _ := info["author"].(map[string]any)
+	var authorID int
+	if author != nil {
+		if u, ok := author["username"].(string); ok {
+			meta["author_username"] = u
+		}
+		if n, ok := author["name"].(string); ok {
+			meta["author_name"] = n
+		}
+		switch v := author["id"].(type) {
+		case float64:
+			authorID = int(v)
+		case int:
+			authorID = v
+		case int64:
+			authorID = int(v)
+		}
+		if authorID != 0 {
+			meta["author_id"] = authorID
+		}
+	}
+	meta["author_email"] = ""
+	if authorID != 0 {
+		user, err := c.GetUserByID(authorID)
+		if err != nil {
+			meta["author_email_error"] = err.Error()
+			return meta, nil
+		}
+		if em, ok := user["email"].(string); ok {
+			meta["author_email"] = em
+		}
+	}
+	return meta, nil
 }
 
 // --- HTTP helpers ---
