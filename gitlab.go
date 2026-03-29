@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -261,71 +260,6 @@ func (c *GitLabClient) GetMRInfo(projectID, mrIID int) (map[string]any, error) {
 	var result map[string]any
 	json.Unmarshal(body, &result)
 	return result, nil
-}
-
-// GetProjectDefaultBranch returns the project's default_branch (e.g. main, master).
-func (c *GitLabClient) GetProjectDefaultBranch(projectID int) (string, error) {
-	apiURL := fmt.Sprintf("%s/api/v4/projects/%d", c.baseURL, projectID)
-	body, err := c.get(apiURL)
-	if err != nil {
-		return "", err
-	}
-	var proj struct {
-		DefaultBranch string `json:"default_branch"`
-	}
-	if err := json.Unmarshal(body, &proj); err != nil {
-		return "", fmt.Errorf("parse project: %w", err)
-	}
-	if strings.TrimSpace(proj.DefaultBranch) == "" {
-		return "", fmt.Errorf("project response missing default_branch")
-	}
-	return proj.DefaultBranch, nil
-}
-
-// GetProjectIDByPath resolves a GitLab project id from its URL-encoded path (e.g. "group/sub/repo").
-func (c *GitLabClient) GetProjectIDByPath(projectPath string) (int, error) {
-	p := strings.TrimSpace(strings.ReplaceAll(projectPath, "\\", "/"))
-	p = strings.Trim(p, "/")
-	if p == "" {
-		return 0, fmt.Errorf("project path required")
-	}
-	enc := url.PathEscape(p)
-	apiURL := fmt.Sprintf("%s/api/v4/projects/%s", c.baseURL, enc)
-	body, err := c.get(apiURL)
-	if err != nil {
-		return 0, err
-	}
-	var proj struct {
-		ID int `json:"id"`
-	}
-	if err := json.Unmarshal(body, &proj); err != nil {
-		return 0, fmt.Errorf("parse project: %w", err)
-	}
-	if proj.ID == 0 {
-		return 0, fmt.Errorf("project response missing id")
-	}
-	return proj.ID, nil
-}
-
-// GetRepositoryFileRaw fetches file contents from the repository ref (branch, tag, or commit SHA).
-// filePath is the path in the repo (e.g. ".dmr/review.tpl"); leading slashes are trimmed.
-func (c *GitLabClient) GetRepositoryFileRaw(projectID int, filePath, ref string) (string, error) {
-	p := strings.TrimSpace(strings.ReplaceAll(filePath, "\\", "/"))
-	p = strings.TrimPrefix(p, "/")
-	if p == "" || p == "." {
-		return "", fmt.Errorf("file_path required")
-	}
-	if strings.TrimSpace(ref) == "" {
-		return "", fmt.Errorf("ref required")
-	}
-	enc := url.PathEscape(p)
-	apiURL := fmt.Sprintf("%s/api/v4/projects/%d/repository/files/%s/raw?ref=%s",
-		c.baseURL, projectID, enc, url.QueryEscape(ref))
-	body, err := c.get(apiURL)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
 }
 
 // GetUserByID fetches a GitLab user by id (email visible only with sufficient token permissions).

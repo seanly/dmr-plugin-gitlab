@@ -12,19 +12,15 @@ type GitLabPluginConfig struct {
 
 	// Review behavior
 	ReviewLanguage string `json:"review_language"`
-	// ReviewPromptSource: builtin | config | current | external.
-	// Omit or leave empty: legacy — if review_prompt_file set → current; else if review_prompt set → config; else builtin.
-	// Explicit unknown value: logged and treated as builtin.
-	ReviewPromptSource      string   `json:"review_prompt_source"`
-	ReviewPrompt            string   `json:"review_prompt"`
-	ReviewPromptFile        string   `json:"review_prompt_file"`
-	ReviewPromptRef         string   `json:"review_prompt_ref"`          // branch/tag/SHA; empty → project default_branch (for current/external)
-	ReviewPromptProjectPath string   `json:"review_prompt_project_path"` // GitLab namespaced path, e.g. group/sub/repo (external only)
-	ConfigBaseDir           string   `json:"config_base_dir"`            // injected by DMR; base for relative review_prompt file paths (config mode)
-	MaxDiffLines            int      `json:"max_diff_lines"`
-	IgnorePatterns          []string `json:"ignore_patterns"`
-	CooldownSeconds         int      `json:"cooldown_seconds"`
-	BlockMergeDuringReview  bool     `json:"block_merge_during_review"` // mark MR WIP while DMR runs (GitLab blocks merge)
+	// ConfigBaseDir is injected by DMR; base for mr_prompts_file and file: paths inside the JSON map.
+	ConfigBaseDir string `json:"config_base_dir"`
+	// MRPromptsFile: optional JSON with "default" and "by_path" (path_with_namespace → specifier).
+	// Relative path is under config_base_dir. Empty → use built-in DefaultReviewPrompt only.
+	MRPromptsFile string `json:"mr_prompts_file"`
+	MaxDiffLines        int      `json:"max_diff_lines"`
+	IgnorePatterns      []string `json:"ignore_patterns"`
+	CooldownSeconds        int  `json:"cooldown_seconds"`
+	BlockMergeDuringReview bool `json:"block_merge_during_review"` // mark MR WIP while DMR runs (GitLab blocks merge)
 
 	// Concurrency: 0 = unlimited (each webhook spawns its own goroutine, legacy behavior).
 	// When MaxConcurrentReviews > 0, jobs go through a worker pool; queue full → HTTP 503.

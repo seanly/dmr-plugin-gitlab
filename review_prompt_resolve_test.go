@@ -6,22 +6,24 @@ import (
 	"testing"
 )
 
-func TestNormalizeReviewPromptSource(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"", "builtin"},
-		{"  Builtin  ", "builtin"},
-		{"CONFIG", "config"},
-		{"current", "current"},
-		{"external", "external"},
-		{"garbage", "builtin"},
+func TestResolveReviewTemplate_noMappingFileUsesBuiltin(t *testing.T) {
+	s := &WebhookServer{config: GitLabPluginConfig{}}
+	if got := s.resolveReviewTemplate("g/r"); got != DefaultReviewPrompt {
+		t.Fatalf("expected builtin default")
 	}
-	for _, tc := range tests {
-		got := normalizeReviewPromptSource(tc.in)
-		if got != tc.want {
-			t.Errorf("normalizeReviewPromptSource(%q) = %q, want %q", tc.in, got, tc.want)
-		}
+}
+
+func TestResolveReviewTemplate_jsonNoMatchUsesBuiltin(t *testing.T) {
+	base := t.TempDir()
+	if err := os.WriteFile(filepath.Join(base, "m.json"), []byte(`{"by_path":{"other/x": "builtin"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &WebhookServer{config: GitLabPluginConfig{
+		ConfigBaseDir:       base,
+		MRPromptsFile: "m.json",
+	}}
+	if got := s.resolveReviewTemplate("g/r"); got != DefaultReviewPrompt {
+		t.Fatalf("no match and no default → builtin")
 	}
 }
 

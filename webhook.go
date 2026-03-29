@@ -27,6 +27,9 @@ type ReviewPromptData struct {
 	SourceBranch   string
 	TargetBranch   string
 	ReviewLanguage string
+	// AuthorEmailFromWebhook is set from the webhook JSON when GitLab includes it (last_commit.author.email, then user.email).
+	// gitlabGetMrMeta may still return empty author_email if the API token cannot read /users/:id email.
+	AuthorEmailFromWebhook string
 }
 
 // WebhookServer receives GitLab webhook events and triggers code review.
@@ -41,6 +44,11 @@ type WebhookServer struct {
 
 	// reviewJobQueue is non-nil when max_concurrent_reviews > 0 (worker pool + bounded queue).
 	reviewJobQueue chan reviewJob
+
+	mrReviewMu   sync.Mutex
+	mrReviewPath string
+	mrReviewMod  time.Time
+	mrReviewDoc  *mrReviewPromptsFile
 }
 
 // reviewJob is one MR review handed to a worker.
@@ -209,17 +217,18 @@ func (s *WebhookServer) triggerReview(projectID, mrIID int, event GitLabWebhookE
 	tapeName := fmt.Sprintf("gitlab:%d:mr:%d", projectID, mrIID)
 
 	data := ReviewPromptData{
-		ProjectID:      projectID,
-		ProjectName:    event.Project.Name,
-		MRIID:          mrIID,
-		Title:          event.ObjectAttributes.Title,
-		Description:    event.ObjectAttributes.Description,
-		SourceBranch:   event.ObjectAttributes.SourceBranch,
-		TargetBranch:   event.ObjectAttributes.TargetBranch,
-		ReviewLanguage: s.config.ReviewLanguage,
+		ProjectID:              projectID,
+		ProjectName:            event.Project.Name,
+		MRIID:                  mrIID,
+		Title:                  event.ObjectAttributes.Title,
+		Description:            event.ObjectAttributes.Description,
+		SourceBranch:           event.ObjectAttributes.SourceBranch,
+		TargetBranch:           event.ObjectAttributes.TargetBranch,
+		ReviewLanguage:         s.config.ReviewLanguage,
+		AuthorEmailFromWebhook: authorEmailFromWebhook(event),
 	}
 
-	tmplStr := s.resolveReviewTemplate(projectID)
+	tmplStr := s.resolveReviewTemplate(event.Project.PathWithNamespace)
 
 	prompt, err := renderPrompt(tmplStr, data)
 	if err != nil {
@@ -325,24 +334,62 @@ func (s *WebhookServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 // GitLabWebhookEvent represents a GitLab webhook payload.
 type GitLabWebhookEvent struct {
 	ObjectKind       string        `json:"object_kind"`
+	User             *WebhookUser  `json:"user"`
 	Project          GitLabProject `json:"project"`
 	ObjectAttributes MRAttributes  `json:"object_attributes"`
 }
 
+// WebhookUser is the "user" who triggered the hook (often the MR author on open).
+type WebhookUser struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+}
+
 type GitLabProject struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID                int    `json:"id"`
+	Name              string `json:"name"`
+	PathWithNamespace string `json:"path_with_namespace"`
 }
 
 type MRAttributes struct {
-	IID            int    `json:"iid"`
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	Action         string `json:"action"`
-	State          string `json:"state"`
-	SourceBranch   string `json:"source_branch"`
-	TargetBranch   string `json:"target_branch"`
-	WorkInProgress bool   `json:"work_in_progress"`
+	IID            int         `json:"iid"`
+	Title          string      `json:"title"`
+	Description    string      `json:"description"`
+	Action         string      `json:"action"`
+	State          string      `json:"state"`
+	SourceBranch   string      `json:"source_branch"`
+	TargetBranch   string      `json:"target_branch"`
+	WorkInProgress bool        `json:"work_in_progress"`
+	LastCommit     *LastCommit `json:"last_commit"`
+}
+
+// LastCommit mirrors object_attributes.last_commit on merge_request webhooks.
+type LastCommit struct {
+	ID      string       `json:"id"`
+	Message string       `json:"message"`
+	Author  CommitPerson `json:"author"`
+}
+
+// CommitPerson is name + email as GitLab sends on commits.
+type CommitPerson struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+func authorEmailFromWebhook(event GitLabWebhookEvent) string {
+	if lc := event.ObjectAttributes.LastCommit; lc != nil {
+		if e := strings.TrimSpace(lc.Author.Email); e != "" {
+			return e
+		}
+	}
+	if event.User != nil {
+		if e := strings.TrimSpace(event.User.Email); e != "" {
+			return e
+		}
+	}
+	return ""
 }
 
 // --- Deduplicator ---

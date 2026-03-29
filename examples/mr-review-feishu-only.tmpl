@@ -1,0 +1,47 @@
+请审查 GitLab MR #{{.MRIID}}（{{.Title}}）的代码变更，**仅通过飞书**输出审查结果；**不要在 GitLab MR 上发评论或行内讨论**。
+
+MR 信息：
+- 项目: {{.ProjectName}} (ID: {{.ProjectID}})
+- 标题: {{.Title}}
+- 描述: {{.Description}}
+- 源分支: {{.SourceBranch}} → 目标分支: {{.TargetBranch}}
+{{if .AuthorEmailFromWebhook}}- Webhook 同步邮箱（GitLab API 常隐藏 author_email 时可用；来自 last_commit.author 或 user）: {{.AuthorEmailFromWebhook}}
+{{end}}
+
+## 硬性约束
+
+- **禁止**调用 `gitlabPostComment`。
+- **禁止**调用 `gitlabPostDiscussion`。
+- 允许且需要： `gitlabGetMrMeta`、`gitlabGetMrDiff`（仅用于读 MR，不在 GitLab 写任何内容）。
+
+## 前置条件
+
+- DMR 已启用 **`dmr-plugin-feishu-notify`**，配置好默认模板与（建议）`default_chat_id`。
+- 飞书卡片变量 key 与本提示中 `template_variable` 一致；**只发飞书**时建议在卡片里放较长正文，例如变量 `review_detail`（Markdown 或纯文本，注意飞书模板字段长度限制，过长需你自己在卡片里分段或截断）。
+
+| 建议变量 key | 含义 |
+|-------------|------|
+| `mr_title` | MR 标题 |
+| `mr_url` | `web_url`（gitlabGetMrMeta） |
+| `project_path` | 项目可读标识 |
+| `branch_info` | `{{.SourceBranch}} → {{.TargetBranch}}` |
+| `review_summary` | 1～3 句结论 |
+| `review_detail` | 主要问题列表、建议修改点（**替代**原本会发到 GitLab 的正文；可按需删列） |
+| `risk_level` | 如：`无阻塞` / `建议修改` / `需关注` |
+
+## 执行步骤
+
+1. `gitlabGetMrMeta`（`project_id={{.ProjectID}}`, `mr_iid={{.MRIID}}`）— 取 `web_url`、`author_email` 等。
+
+2. `gitlabGetMrDiff`（`project_id={{.ProjectID}}`, `mr_iid={{.MRIID}}`）— 阅读变更并完成审查推理。
+
+3. 在内心/推理中整理：**结论** + **具体问题与建议**（这些内容只写入飞书 `template_variable`，不写 GitLab）。
+
+4. 调用 **`feishuNotifyByEmail`** 一次即可：
+   - `emails`：若 `gitlabGetMrMeta` 的 `author_email` 非空则用之；**否则若上文 MR 信息里 Webhook 邮箱非空**则 `["该 Webhook 邮箱"]`；再否则 `[]`（仅依赖插件的 `default_chat_id` 群发）。
+   - `template_variable`：填齐你的飞书变量；`review_detail` 承载主要审查输出。
+   - 无需 `template_id` 时使用插件默认。
+
+5. 调用 `tape.handoff`（`name` 建议 `gitlab:mr:{{.MRIID}}:review-done:<UTC时间戳>`，`summary` 可写 `feishu-only review done`）。
+
+审查语言：{{.ReviewLanguage}}
