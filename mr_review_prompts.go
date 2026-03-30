@@ -24,10 +24,20 @@ func lookupMRReviewPromptSpec(doc *mrReviewPromptsFile, pathWithNamespace string
 	}
 	p := strings.TrimSpace(pathWithNamespace)
 	if p != "" && doc.ByPath != nil {
+		// 1. 精确匹配优先
 		if v, exists := doc.ByPath[p]; exists {
 			v = strings.TrimSpace(v)
 			if v != "" {
 				return v, true
+			}
+		}
+		// 2. 通配符匹配（支持 group/* 和 group/**）
+		for pattern, v := range doc.ByPath {
+			if matchPathPattern(pattern, p) {
+				v = strings.TrimSpace(v)
+				if v != "" {
+					return v, true
+				}
 			}
 		}
 	}
@@ -36,6 +46,40 @@ func lookupMRReviewPromptSpec(doc *mrReviewPromptsFile, pathWithNamespace string
 		return d, true
 	}
 	return "", false
+}
+
+// matchPathPattern checks if path matches a glob-like pattern.
+// Supports:
+//   - exact match: "group/project"
+//   - single-level wildcard: "group/*" matches "group/foo" but not "group/sub/foo"
+//   - multi-level wildcard: "group/**" matches "group/foo" and "group/sub/foo"
+func matchPathPattern(pattern, path string) bool {
+	pattern = strings.TrimSpace(pattern)
+	path = strings.TrimSpace(path)
+
+	// 精确匹配
+	if pattern == path {
+		return true
+	}
+
+	// 单层通配符 group/*
+	if strings.HasSuffix(pattern, "/*") {
+		prefix := strings.TrimSuffix(pattern, "/*")
+		if !strings.HasPrefix(path, prefix+"/") {
+			return false
+		}
+		remainder := strings.TrimPrefix(path, prefix+"/")
+		// 不能包含更多的 /
+		return !strings.Contains(remainder, "/")
+	}
+
+	// 多层通配符 group/**
+	if strings.HasSuffix(pattern, "/**") {
+		prefix := strings.TrimSuffix(pattern, "/**")
+		return strings.HasPrefix(path, prefix+"/")
+	}
+
+	return false
 }
 
 func (s *WebhookServer) resolvedMRReviewPromptsPath() (string, error) {

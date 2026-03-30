@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -432,6 +433,28 @@ func (c *GitLabClient) GetMRTitle(projectID, mrIID int) (string, error) {
 	}
 	t, _ := info["title"].(string)
 	return t, nil
+}
+
+// AddProjectWebhook creates a merge_requests webhook for a GitLab project identified by path_with_namespace.
+func (c *GitLabClient) AddProjectWebhook(projectPath, webhookURL, token string) (map[string]any, error) {
+	encodedPath := url.PathEscape(projectPath)
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%s/hooks", c.baseURL, encodedPath)
+	payload := map[string]any{
+		"url":                     webhookURL,
+		"merge_requests_events":   true,
+		"push_events":             false,
+		"enable_ssl_verification": true,
+	}
+	if token != "" {
+		payload["token"] = token
+	}
+	respBody, err := c.post(apiURL, payload)
+	if err != nil {
+		return nil, fmt.Errorf("add webhook: %w", err)
+	}
+	var result map[string]any
+	json.Unmarshal(respBody, &result)
+	return result, nil
 }
 
 // --- Utility ---

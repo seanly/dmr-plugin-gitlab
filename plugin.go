@@ -138,6 +138,19 @@ func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 				"required": ["project_id", "mr_iid", "file_path", "new_line", "body"]
 			}`,
 		},
+		{
+			Name:        "gitlabAddWebhook",
+			Description: "为 GitLab 项目添加 Merge Request webhook",
+			ParametersJSON: `{
+				"type": "object",
+				"properties": {
+					"project_path": {"type": "string", "description": "项目路径（path_with_namespace），如 group/my-project"},
+					"url": {"type": "string", "description": "Webhook 接收 URL"},
+					"token": {"type": "string", "description": "Secret token（可选，用于验证 webhook 请求来源）"}
+				},
+				"required": ["project_path", "url"]
+			}`,
+		},
 	}
 	return nil
 }
@@ -162,22 +175,32 @@ func (p *GitLabPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 }
 
 func (p *GitLabPlugin) executeTool(name string, args map[string]any) (any, error) {
-	projectID := intArg(args, "project_id")
-	mrIID := intArg(args, "mr_iid")
-
 	switch name {
 	case "gitlabGetMrDiff":
+		projectID := intArg(args, "project_id")
+		mrIID := intArg(args, "mr_iid")
 		return p.glClient.GetMRDiff(projectID, mrIID, p.config.MaxDiffLines, p.config.IgnorePatterns)
 	case "gitlabGetMrMeta":
+		projectID := intArg(args, "project_id")
+		mrIID := intArg(args, "mr_iid")
 		return p.glClient.GetMRMeta(projectID, mrIID)
 	case "gitlabPostComment":
+		projectID := intArg(args, "project_id")
+		mrIID := intArg(args, "mr_iid")
 		body, _ := args["body"].(string)
 		return p.glClient.PostComment(projectID, mrIID, body)
 	case "gitlabPostDiscussion":
+		projectID := intArg(args, "project_id")
+		mrIID := intArg(args, "mr_iid")
 		filePath, _ := args["file_path"].(string)
 		newLine := intArg(args, "new_line")
 		body, _ := args["body"].(string)
 		return p.glClient.PostDiscussion(projectID, mrIID, filePath, newLine, body)
+	case "gitlabAddWebhook":
+		projectPath, _ := args["project_path"].(string)
+		webhookURL, _ := args["url"].(string)
+		token, _ := args["token"].(string)
+		return p.glClient.AddProjectWebhook(projectPath, webhookURL, token)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}

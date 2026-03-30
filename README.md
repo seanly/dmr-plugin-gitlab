@@ -77,15 +77,22 @@ max_queued_reviews = 128
   "default": "builtin",
   "by_path": {
     "group/sub/frontend": "file:./prompts/frontend.tmpl",
-    "group/sub/backend": "file:./prompts/go-service.tmpl"
+    "group/sub/backend": "file:./prompts/go-service.tmpl",
+    "devops/*": "file:./prompts/devops-team.tmpl",
+    "platform/**": "file:./prompts/platform-all.tmpl"
   }
 }
 ```
 
-- **查找顺序**：Webhook 的 `project.path_with_namespace` → `by_path` 精确匹配 → 否则 `default`。
+- **查找顺序**：Webhook 的 `project.path_with_namespace` → `by_path` 精确匹配 → 通配符匹配 → 否则 `default`。
+- **通配符支持**：
+  - `group/*`：单层通配符，匹配 `group/foo`，不匹配 `group/sub/foo`
+  - `group/**`：多层通配符，匹配 `group/foo` 和 `group/sub/foo`
+  - 精确匹配优先于通配符
 - **未配置** `mr_prompts_file`，或 JSON **读失败**，或未匹配 `by_path` 且 JSON **没有**可用的 `default`：使用内置 `DefaultReviewPrompt`。
 - **取值**（与原先 `review_prompt` config 模式一致）：`builtin`；`file:...` 或 `config_base_dir` 下相对/绝对路径（读文件）；或其它非空字符串（内联 Go `text/template`）。读文件失败会记日志并回退内置模板。
-- **审查结束后发飞书**：见 [`examples/mr-review-with-feishu.tmpl`](examples/mr-review-with-feishu.tmpl)（GitLab 评论 + 飞书）。**只在飞书写结论、不回写 GitLab**：见 [`examples/mr-review-feishu-only.tmpl`](examples/mr-review-feishu-only.tmpl)（依赖提示词禁止 `gitlabPostComment` / `gitlabPostDiscussion`；仍需 `feishu_notify` 与飞书卡片变量对齐）。
+- **飞书通知 chat_id**：可在自定义模板中直接写死 `chat_id: "oc_xxx"`，不同项目/组使用不同模板即可实现按项目分群通知。
+- **审查结束后发飞书**：见 [`examples/mr-review-with-feishu.tmpl`](examples/mr-review-with-feishu.tmpl)（GitLab 评论 + 飞书）。**只在飞书写结论、不回写 GitLab**：见 [`examples/mr-review-feishu-only.tmpl`](examples/mr-review-feishu-only.tmpl)（依赖提示词禁止 `gitlabPostComment` / `gitlabPostDiscussion`；仍需 `feishu_notify` 与飞书卡片变量对齐）。**按 group 分群通知**：见 [`examples/mr-review-with-group-chat.tmpl`](examples/mr-review-with-group-chat.tmpl)（配合 `by_path` 通配符，为不同 group 写死不同 `chat_id`）。
 
 ### 审查期间禁止合并（`block_merge_during_review`）
 
