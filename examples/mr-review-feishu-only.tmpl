@@ -31,9 +31,9 @@ MR 信息：
 
 ## 执行步骤
 
-1. `gitlabGetMrMeta`（`project_id={{.ProjectID}}`, `mr_iid={{.MRIID}}`）— 取 `web_url`、`author_email` 等。
+1. `gitlabGetMrMeta` — 取 `web_url`、`author_email` 等。
 
-2. `gitlabGetMrDiff`（`project_id={{.ProjectID}}`, `mr_iid={{.MRIID}}`）— 阅读变更并完成审查推理。
+2. `gitlabGetMrDiff` — 阅读变更并完成审查推理。
 
 3. 在内心/推理中整理：**结论** + **具体问题与建议**（这些内容只写入飞书 `template_variable`，不写 GitLab）。
 

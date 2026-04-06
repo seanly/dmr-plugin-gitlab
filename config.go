@@ -29,6 +29,8 @@ type GitLabPluginConfig struct {
 }
 
 // DefaultReviewPrompt is the default Go template for constructing the review prompt.
+// When triggered by a GitLab webhook, project_id and mr_iid are automatically
+// provided via context, so tools can be called without explicit parameters.
 const DefaultReviewPrompt = `请审查 GitLab MR #{{.MRIID}}（{{.Title}}）的代码变更。
 
 MR 信息：
@@ -38,10 +40,10 @@ MR 信息：
 - 源分支: {{.SourceBranch}} → 目标分支: {{.TargetBranch}}
 
 请执行以下步骤：
-1. 使用 gitlabGetMrDiff 工具获取 MR 的代码变更（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
+1. 使用 gitlabGetMrDiff 工具获取 MR 的代码变更
 2. 仔细审查每个文件的变更，关注代码质量、潜在 Bug、安全问题和性能问题
-3. 使用 gitlabPostComment 工具发布整体审查总结（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
-4. 对于具体的代码问题，使用 gitlabPostDiscussion 工具在对应代码行上添加行内评论（project_id={{.ProjectID}}, mr_iid={{.MRIID}}）
+3. 使用 gitlabPostComment 工具发布整体审查总结
+4. 对于具体的代码问题，使用 gitlabPostDiscussion 工具在对应代码行上添加行内评论
 5. 在完成 comment/discussion 之后，调用 tape.handoff 工具：为当前 tape 添加一个 phase boundary anchor，避免下一次审查把本次历史全部带入上下文。
    - name 建议：gitlab:mr:{{.MRIID}}:review-done:<UTC时间戳>
      （UTC 时间戳格式建议：20060102-150405，例如 20260320-181530。）

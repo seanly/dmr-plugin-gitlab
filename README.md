@@ -15,6 +15,27 @@ GitLab ── Webhook POST ──▶ dmr-plugin-gitlab ──▶ DMR Host (RunAg
 
 插件通过 HashiCorp go-plugin (net/rpc) 与 DMR 主进程通信，利用 MuxBroker 反向 RPC 触发 agent.Run()。
 
+### 上下文传递（Context Passing）
+
+当 GitLab Webhook 触发审查时，插件会自动将 MR 上下文（`project_id`, `mr_iid`）通过 `ContextJSON` 传递给 DMR：
+
+```
+RunAgentRequest {
+    TapeName:    "gitlab:123:mr:456",
+    Prompt:      "...",
+    ContextJSON: `{"project_id":123,"mr_iid":456,"project_name":"group/project"}`
+}
+```
+
+工具在执行时自动从上下文中获取 `project_id` 和 `mr_iid`，无需在调用时提供：
+
+```
+// 简洁调用，自动使用当前 MR
+gitlabGetMrDiff()
+gitlabPostComment(body="代码审查通过")
+gitlabPostDiscussion(file_path="src/main.go", new_line=42, body="这里需要添加错误处理")
+```
+
 ## 构建 & 安装
 
 ```bash
@@ -130,12 +151,31 @@ max_queued_reviews = 128
 
 ## 提供的 Tools
 
-| Tool | 说明 |
-|------|------|
-| `gitlabGetMrDiff` | 获取 MR 的代码变更 diff |
-| `gitlabGetMrMeta` | 获取 MR 元数据（标题、分支、web_url、作者；`author_email` 需 Token 有足够权限） |
-| `gitlabPostComment` | 在 MR 上发布整体审查评论 |
-| `gitlabPostDiscussion` | 在 MR 具体代码行上创建讨论 |
+所有工具都在**当前 MR 审查上下文**中自动执行，无需提供 `project_id` 和 `mr_iid`。
+
+| Tool | 说明 | 必需参数 |
+|------|------|----------|
+| `gitlabGetMrDiff` | 获取当前 MR 的代码变更 diff | 无 |
+| `gitlabGetMrMeta` | 获取当前 MR 元数据（标题、分支、web_url、作者；`author_email` 需 Token 有足够权限） | 无 |
+| `gitlabPostComment` | 在当前 MR 上发布整体审查评论 | `body` |
+| `gitlabPostDiscussion` | 在当前 MR 具体代码行上创建讨论 | `file_path`, `new_line`, `body` |
+
+### 工具使用示例
+
+```
+// 获取当前 MR 的 diff
+gitlabGetMrDiff()
+
+// 发布评论到当前 MR
+gitlabPostComment(body="整体代码质量良好，建议补充单元测试")
+
+// 在指定行添加行内评论
+gitlabPostDiscussion(
+    file_path="src/utils.js",
+    new_line=25,
+    body="这里应该添加 null 检查"
+)
+```
 
 ## Tape 命名
 

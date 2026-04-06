@@ -236,9 +236,18 @@ func (s *WebhookServer) triggerReview(projectID, mrIID int, event GitLabWebhookE
 		prompt, _ = renderPrompt(DefaultReviewPrompt, data)
 	}
 
+	// Build context to pass to RunAgent - tools can use this as default values
+	ctx := map[string]any{
+		"project_id":   projectID,
+		"mr_iid":       mrIID,
+		"project_name": event.Project.Name,
+	}
+	ctxJSON, _ := json.Marshal(ctx)
+
 	req := &proto.RunAgentRequest{
-		TapeName: tapeName,
-		Prompt:   prompt,
+		TapeName:    tapeName,
+		Prompt:      prompt,
+		ContextJSON: string(ctxJSON),
 	}
 	var resp proto.RunAgentResponse
 

@@ -25,15 +25,15 @@ MR 信息：
 
 ## 执行步骤
 
-1. **元数据**：调用 `gitlabGetMrMeta`（`project_id={{.ProjectID}}`, `mr_iid={{.MRIID}}`），记录 `web_url`、作者相关字段；若存在 `author_email` 则用于飞书私信。
+1. **元数据**：调用 `gitlabGetMrMeta`，记录 `web_url`、作者相关字段；若存在 `author_email` 则用于飞书私信。
 
-2. **差异**：调用 `gitlabGetMrDiff`（`project_id={{.ProjectID}}`, `mr_iid={{.MRIID}}`），通读变更。
+2. **差异**：调用 `gitlabGetMrDiff`，通读变更。
 
 3. **审查**：按 {{.ReviewLanguage}} 关注质量、缺陷、安全、性能等；对需改点准备行内意见文案。
 
-4. **GitLab 总结**：调用 `gitlabPostComment` 发布**完整**审查总结（Markdown，`project_id={{.ProjectID}}`, `mr_iid={{.MRIID}}`）。
+4. **GitLab 总结**：调用 `gitlabPostComment` 发布**完整**审查总结（Markdown）。
 
-5. **行内**：对具体代码问题调用 `gitlabPostDiscussion`（`project_id={{.ProjectID}}`, `mr_iid={{.MRIID}}`, `file_path`, `new_line`, `body`）。
+5. **行内**：对具体代码问题调用 `gitlabPostDiscussion`（`file_path`, `new_line`, `body`）。
 
 6. **飞书通知**：在 GitLab 评论已发出后，调用 **`feishuNotifyByEmail`**：
    - `emails`：`gitlabGetMrMeta` 的 `author_email` 非空则优先；**否则若上文 MR 信息中 Webhook 邮箱非空**则 `["该邮箱"]`；再否则 **`[]`**（仅 `default_chat_id` 群发）。

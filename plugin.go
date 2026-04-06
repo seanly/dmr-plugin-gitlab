@@ -84,58 +84,43 @@ func (p *GitLabPlugin) RequestBatchApproval(req *proto.BatchApprovalRequest, res
 }
 
 // ProvideTools returns the tools this plugin provides to the DMR agent.
+// When called in a GitLab-triggered RunAgent context, project_id and mr_iid are
+// automatically provided from the webhook context; these tools do not accept
+// explicit project_id/mr_iid parameters and always operate on the current MR.
 func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.ProvideToolsResponse) error {
 	resp.Tools = []proto.ToolDef{
 		{
-			Name:        "gitlabGetMrDiff",
-			Description: "获取 GitLab MR 的代码变更 diff",
-			ParametersJSON: `{
-				"type": "object",
-				"properties": {
-					"project_id": {"type": "integer", "description": "GitLab project ID"},
-					"mr_iid": {"type": "integer", "description": "Merge Request IID"}
-				},
-				"required": ["project_id", "mr_iid"]
-			}`,
+			Name:           "gitlabGetMrDiff",
+			Description:    "获取当前 GitLab MR 的代码变更 diff",
+			ParametersJSON: `{"type": "object", "properties": {}}`,
 		},
 		{
-			Name:        "gitlabGetMrMeta",
-			Description: "获取 GitLab MR 元数据（标题、分支、web_url、作者 username/id；author_email 在 Token 权限允许时返回）",
-			ParametersJSON: `{
-				"type": "object",
-				"properties": {
-					"project_id": {"type": "integer", "description": "GitLab project ID"},
-					"mr_iid": {"type": "integer", "description": "Merge Request IID"}
-				},
-				"required": ["project_id", "mr_iid"]
-			}`,
+			Name:           "gitlabGetMrMeta",
+			Description:    "获取当前 GitLab MR 元数据（标题、分支、web_url、作者 username/id；author_email 在 Token 权限允许时返回）",
+			ParametersJSON: `{"type": "object", "properties": {}}`,
 		},
 		{
 			Name:        "gitlabPostComment",
-			Description: "在 GitLab MR 上发布评论（整体审查总结）",
+			Description: "在当前 GitLab MR 上发布评论（整体审查总结）",
 			ParametersJSON: `{
 				"type": "object",
 				"properties": {
-					"project_id": {"type": "integer", "description": "GitLab project ID"},
-					"mr_iid": {"type": "integer", "description": "Merge Request IID"},
 					"body": {"type": "string", "description": "Markdown 格式的评论内容"}
 				},
-				"required": ["project_id", "mr_iid", "body"]
+				"required": ["body"]
 			}`,
 		},
 		{
 			Name:        "gitlabPostDiscussion",
-			Description: "在 GitLab MR 的具体代码行上创建讨论（行内评论）",
+			Description: "在当前 GitLab MR 的具体代码行上创建讨论（行内评论）",
 			ParametersJSON: `{
 				"type": "object",
 				"properties": {
-					"project_id": {"type": "integer", "description": "GitLab project ID"},
-					"mr_iid": {"type": "integer", "description": "Merge Request IID"},
 					"file_path": {"type": "string", "description": "文件路径"},
 					"new_line": {"type": "integer", "description": "MR 新文件中的行号（与 gitlabGetMrDiff 里该文件一致）。插件会从 MR unified diff 自动补全 old_line/old_path，以便 GitLab 13.x 在「变更」里显示锚点"},
 					"body": {"type": "string", "description": "评论内容"}
 				},
-				"required": ["project_id", "mr_iid", "file_path", "new_line", "body"]
+				"required": ["file_path", "new_line", "body"]
 			}`,
 		},
 		{
@@ -163,7 +148,15 @@ func (p *GitLabPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 		return nil
 	}
 
-	result, err := p.executeTool(req.Name, args)
+	// Parse context from the request (passed from RunAgent)
+	toolCtx := make(map[string]any)
+	if req.ContextJSON != "" {
+		if err := json.Unmarshal([]byte(req.ContextJSON), &toolCtx); err != nil {
+			log.Printf("dmr-plugin-gitlab: CallTool %s failed to parse context JSON: %v", req.Name, err)
+		}
+	}
+
+	result, err := p.executeTool(req.Name, args, toolCtx)
 	if err != nil {
 		resp.Error = err.Error()
 		return nil
@@ -174,24 +167,36 @@ func (p *GitLabPlugin) CallTool(req *proto.CallToolRequest, resp *proto.CallTool
 	return nil
 }
 
-func (p *GitLabPlugin) executeTool(name string, args map[string]any) (any, error) {
+func (p *GitLabPlugin) executeTool(name string, args, toolCtx map[string]any) (any, error) {
 	switch name {
 	case "gitlabGetMrDiff":
-		projectID := intArg(args, "project_id")
-		mrIID := intArg(args, "mr_iid")
+		projectID := intArgWithContext(args, toolCtx, "project_id")
+		mrIID := intArgWithContext(args, toolCtx, "mr_iid")
+		if projectID == 0 || mrIID == 0 {
+			return nil, fmt.Errorf("project_id and mr_iid are required (or must be provided in context)")
+		}
 		return p.glClient.GetMRDiff(projectID, mrIID, p.config.MaxDiffLines, p.config.IgnorePatterns)
 	case "gitlabGetMrMeta":
-		projectID := intArg(args, "project_id")
-		mrIID := intArg(args, "mr_iid")
+		projectID := intArgWithContext(args, toolCtx, "project_id")
+		mrIID := intArgWithContext(args, toolCtx, "mr_iid")
+		if projectID == 0 || mrIID == 0 {
+			return nil, fmt.Errorf("project_id and mr_iid are required (or must be provided in context)")
+		}
 		return p.glClient.GetMRMeta(projectID, mrIID)
 	case "gitlabPostComment":
-		projectID := intArg(args, "project_id")
-		mrIID := intArg(args, "mr_iid")
+		projectID := intArgWithContext(args, toolCtx, "project_id")
+		mrIID := intArgWithContext(args, toolCtx, "mr_iid")
+		if projectID == 0 || mrIID == 0 {
+			return nil, fmt.Errorf("project_id and mr_iid are required (or must be provided in context)")
+		}
 		body, _ := args["body"].(string)
 		return p.glClient.PostComment(projectID, mrIID, body)
 	case "gitlabPostDiscussion":
-		projectID := intArg(args, "project_id")
-		mrIID := intArg(args, "mr_iid")
+		projectID := intArgWithContext(args, toolCtx, "project_id")
+		mrIID := intArgWithContext(args, toolCtx, "mr_iid")
+		if projectID == 0 || mrIID == 0 {
+			return nil, fmt.Errorf("project_id and mr_iid are required (or must be provided in context)")
+		}
 		filePath, _ := args["file_path"].(string)
 		newLine := intArg(args, "new_line")
 		body, _ := args["body"].(string)
@@ -209,6 +214,20 @@ func (p *GitLabPlugin) executeTool(name string, args map[string]any) (any, error
 // intArg extracts an int from a map[string]any (JSON numbers are float64).
 func intArg(args map[string]any, key string) int {
 	if v, ok := args[key].(float64); ok {
+		return int(v)
+	}
+	return 0
+}
+
+// intArgWithContext extracts an int from args, falling back to toolCtx if not present.
+// This allows tools to use context values passed from RunAgent as defaults.
+func intArgWithContext(args, toolCtx map[string]any, key string) int {
+	// First try args
+	if v := intArg(args, key); v != 0 {
+		return v
+	}
+	// Fall back to context
+	if v, ok := toolCtx[key].(float64); ok {
 		return int(v)
 	}
 	return 0
