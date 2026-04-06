@@ -1,27 +1,15 @@
-请审查 GitLab MR #{{.MRIID}}（{{.Title}}）的代码变更，并在完成后将**审查结论**通过飞书互动卡片通知作者（及可选群组）。
+请审查 GitLab MR #{{.MRIID}}（{{.Title}}）的代码变更，并在完成后将**审查结论**通过飞书消息通知群组。
 
 MR 信息：
 - 项目: {{.ProjectName}} (ID: {{.ProjectID}})
 - 标题: {{.Title}}
 - 描述: {{.Description}}
 - 源分支: {{.SourceBranch}} → 目标分支: {{.TargetBranch}}
-{{if .AuthorEmailFromWebhook}}- Webhook 同步邮箱（API 无 author_email 时可用于飞书私信匹配）: {{.AuthorEmailFromWebhook}}
-{{end}}
 
-## 前置条件（由运维/你在 DMR 配好即可）
+## 前置条件
 
-- DMR 主配置中已启用外部插件 **`dmr-plugin-feishu-notify`**，且 `default_template_id`、`default_template_version_name`、（建议）`default_chat_id` 已配置。
-- 飞书开放平台中已创建**互动卡片模板**，模板变量名需与下文 `template_variable` 的 **key 完全一致**（若你的卡片用中文变量名，请在下发时将 key 改成与后台一致，并保持本提示词里描述的含义）。
-- 建议卡片变量与下表对应（可按需增删，但工具调用里的 key 必须与你的飞书模板一致）：
-
-| 建议变量 key | 含义 |
-|-------------|------|
-| `mr_title` | MR 标题 |
-| `mr_url` | MR 页面链接（来自 gitlabGetMrMeta 的 `web_url`） |
-| `project_path` | 仓库路径说明，可用 `{{.ProjectName}}` 或 meta 里能拿到的路径 |
-| `branch_info` | 如 `{{.SourceBranch}} -> {{.TargetBranch}}` |
-| `review_summary` | 给通知用的**简短结论**（一两句话，不堆砌全文） |
-| `risk_level` | 可选：`无阻塞` / `建议修改` / `需关注` 等 |
+- DMR 已启用 **`dmr-plugin-feishu`**（飞书机器人插件）。
+- 在 DMR 配置中设置飞书群 `chat_id`（或在调用工具时传入）。
 
 ## 执行步骤
 
@@ -35,20 +23,33 @@ MR 信息：
 
 5. **行内**：对具体代码问题调用 `gitlabPostDiscussion`（`file_path`, `new_line`, `body`）。
 
-6. **飞书通知**：在 GitLab 评论已发出后，调用 **`feishuNotifyByEmail`**：
-   - `emails`：`gitlabGetMrMeta` 的 `author_email` 非空则优先；**否则若上文 MR 信息中 Webhook 邮箱非空**则 `["该邮箱"]`；再否则 **`[]`**（仅 `default_chat_id` 群发）。
-   - `template_variable`：**对象**，键名必须与你的飞书卡片变量一致，值示例：
-     - `mr_title`: 「{{.Title}}」或 meta 中标题
-     - `mr_url`: meta 的 `web_url`
-     - `project_path`: 可读项目标识
-     - `branch_info`: `{{.SourceBranch}} → {{.TargetBranch}}`
-     - `review_summary`: 从步骤 4 的总结中**压缩**成 1～3 句结论（问题数量、是否阻塞合并、优先修什么）
-     - `risk_level`: 你根据审查结果选的短标签
-   - 不传 `template_id` / `template_version_name` 时沿用插件默认模板。
-   - 若作者邮箱解析失败或未配置作者邮箱，只要 `default_chat_id` 有效，仍应向群发送，避免“零通知”。
+6. **飞书通知**：在 GitLab 评论已发出后，调用 **`feishuSendText`** 发送审查结论到群：
+   - `text`：整理为 Markdown 格式的简短通知，包含：
+     - MR 基本信息（项目、标题、链接、分支）
+     - 审查总结（1～3 句结论，问题数量、风险等级）
+     - 提示”详细审查意见已发布到 GitLab MR”
+     - **注意：不要在飞书消息中包含敏感信息（密码、token、密钥、凭证等），只描述问题类型和严重程度，具体内容请用户到 GitLab MR 查看**
+   - `markdown`：`true`（启用飞书富文本渲染）
+   - `chat_id`：飞书群 ID（如 `oc_xxx`；若 DMR 配置中已设置可省略）
+
+   示例文本格式：
+   ```
+   ## GitLab MR 审查完成
+
+   **项目**: {{.ProjectName}}
+   **MR**: #{{.MRIID}} {{.Title}}
+   **链接**: [查看 MR](<web_url>)
+   **分支**: {{.SourceBranch}} → {{.TargetBranch}}
+
+   **审查结论**: <1～3 句总结>
+   **风险等级**: <无阻塞/建议修改/需关注>
+
+   详细审查意见和行内评论已发布到 GitLab MR，请查看。
+   ```
 
 7. **handoff**：最后调用 `tape.handoff`，避免下次同 MR 上下文爆炸：
    - `name` 建议：`gitlab:mr:{{.MRIID}}:review-done:<UTC时间戳>`（时间戳格式建议 `20060102-150405`）
    - `summary` 可选：`review+feishu notify done for mr_iid={{.MRIID}}`
+   - **使用当前实际时间**（2026 年 3 月），不要使用过去的日期
 
 审查语言：{{.ReviewLanguage}}
