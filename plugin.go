@@ -93,48 +93,36 @@ func (p *GitLabPlugin) ProvideTools(req *proto.ProvideToolsRequest, resp *proto.
 			Name:           "gitlabGetMrDiff",
 			Description:    "获取当前 GitLab MR 的代码变更 diff",
 			ParametersJSON: `{"type": "object", "properties": {}}`,
+			Group:          "extended",
+			SearchHint:     "gitlab, mr, diff, changes, code review, 代码变更, 差异",
 		},
 		{
 			Name:           "gitlabGetMrMeta",
 			Description:    "获取当前 GitLab MR 元数据（标题、分支、web_url、作者 username/id；author_email 在 Token 权限允许时返回）",
 			ParametersJSON: `{"type": "object", "properties": {}}`,
+			Group:          "extended",
+			SearchHint:     "gitlab, mr, metadata, info, author, 元数据, 信息",
 		},
 		{
-			Name:        "gitlabPostComment",
-			Description: "在当前 GitLab MR 上发布评论（整体审查总结）",
-			ParametersJSON: `{
-				"type": "object",
-				"properties": {
-					"body": {"type": "string", "description": "Markdown 格式的评论内容"}
-				},
-				"required": ["body"]
-			}`,
+			Name:           "gitlabPostComment",
+			Description:    "在当前 GitLab MR 上发布评论（整体审查总结）",
+			ParametersJSON: `{"type": "object", "properties": {"body": {"type": "string", "description": "Markdown 格式的评论内容"}}, "required": ["body"]}`,
+			Group:          "extended",
+			SearchHint:     "gitlab, mr, comment, review, 评论, 评审",
 		},
 		{
-			Name:        "gitlabPostDiscussion",
-			Description: "在当前 GitLab MR 的具体代码行上创建讨论（行内评论）",
-			ParametersJSON: `{
-				"type": "object",
-				"properties": {
-					"file_path": {"type": "string", "description": "文件路径"},
-					"new_line": {"type": "integer", "description": "MR 新文件中的行号（与 gitlabGetMrDiff 里该文件一致）。插件会从 MR unified diff 自动补全 old_line/old_path，以便 GitLab 13.x 在「变更」里显示锚点"},
-					"body": {"type": "string", "description": "评论内容"}
-				},
-				"required": ["file_path", "new_line", "body"]
-			}`,
+			Name:           "gitlabPostDiscussion",
+			Description:    "在当前 GitLab MR 的具体代码行上创建讨论（行内评论）",
+			ParametersJSON: `{"type": "object", "properties": {"file_path": {"type": "string", "description": "文件路径"}, "new_line": {"type": "integer", "description": "MR 新文件中的行号（与 gitlabGetMrDiff 里该文件一致）。插件会从 MR unified diff 自动补全 old_line/old_path，以便 GitLab 13.x 在「变更」里显示锚点"}, "body": {"type": "string", "description": "评论内容"}}, "required": ["file_path", "new_line", "body"]}`,
+			Group:          "extended",
+			SearchHint:     "gitlab, mr, discussion, inline, comment, 讨论, 行内评论",
 		},
 		{
-			Name:        "gitlabAddWebhook",
-			Description: "为 GitLab 项目添加 Merge Request webhook",
-			ParametersJSON: `{
-				"type": "object",
-				"properties": {
-					"project_path": {"type": "string", "description": "项目路径（path_with_namespace），如 group/my-project"},
-					"url": {"type": "string", "description": "Webhook 接收 URL"},
-					"token": {"type": "string", "description": "Secret token（可选，用于验证 webhook 请求来源）"}
-				},
-				"required": ["project_path", "url"]
-			}`,
+			Name:           "gitlabAddWebhook",
+			Description:    "为 GitLab 项目添加 Merge Request webhook",
+			ParametersJSON: `{"type": "object", "properties": {"project_path": {"type": "string", "description": "项目路径（path_with_namespace），如 group/my-project"}, "url": {"type": "string", "description": "Webhook 接收 URL"}, "token": {"type": "string", "description": "Secret token（可选，用于验证 webhook 请求来源）"}}, "required": ["project_path", "url"]}`,
+			Group:          "extended",
+			SearchHint:     "gitlab, webhook, setup, configure, webhook, 配置",
 		},
 	}
 	return nil
