@@ -1,7 +1,8 @@
-.PHONY: build install clean tidy cross-build
+.PHONY: build install install-policy clean tidy cross-build
 
 BINARY := dmr-plugin-gitlab
 INSTALL_DIR := $(HOME)/.dmr/plugins
+POLICY_DIR := $(HOME)/.dmr/etc/policies
 
 build: tidy
 	go build -o $(BINARY) .
@@ -18,6 +19,10 @@ tidy:
 install: build
 	mkdir -p $(INSTALL_DIR)
 	cp $(BINARY) $(INSTALL_DIR)/
+
+install-policy:
+	mkdir -p $(POLICY_DIR)
+	cp policies/gitlab.rego $(POLICY_DIR)/
 
 clean:
 	rm -f $(BINARY)
